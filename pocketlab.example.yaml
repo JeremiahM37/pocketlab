@@ -1,0 +1,59 @@
+# pocketlab configuration. Copy to `pocketlab.yaml` and edit.
+#
+# This file is BOTH the dashboard definition and the access-control boundary:
+# only the hosts, docker endpoint, file roots and terminal ports listed here
+# are reachable. Anything not listed returns 403/404. Keep it tight, and never
+# commit your real pocketlab.yaml (it's gitignored).
+
+title: "My Home Server"
+
+# Which widgets to show, in bottom-nav order. Omit any you don't want.
+# Valid: system, docker, files, terminal, links
+widgets: [system, docker, files, terminal, links]
+
+# ── system widget ──────────────────────────────────────────────────────────
+# Stats for one or more machines. `local` = the box pocketlab runs on. Remote
+# hosts are reached via your system `ssh` (honours ~/.ssh/config + keys), so set
+# up key-based auth first: `ssh-copy-id root@192.168.1.10`.
+hosts:
+  - name: server
+    stats: local
+  # - name: nas
+  #   stats: { ssh: root@192.168.1.10 }
+
+# ── docker widget ──────────────────────────────────────────────────────────
+# Requires:  pip install 'pocketlab[docker]'
+docker:
+  host: local            # or "ssh://user@host" or "tcp://host:2375"
+  hide: []               # hide containers whose name contains any of these
+
+# ── files widget ───────────────────────────────────────────────────────────
+# Each root pins a base directory; browsing is confined to it (no escaping via
+# `..` or symlinks). Remote roots use ssh, like hosts above.
+files:
+  roots:
+    - { name: home, host: local, path: "~" }   # quote ~ — bare ~ is YAML null
+    # - { name: nas, host: "ssh:root@192.168.1.10", path: /mnt/storage }
+  max_download_mib: 2048
+
+# ── terminal widget ────────────────────────────────────────────────────────
+# A real terminal in the browser, via mttyd (https://github.com/JeremiahM37/mttyd).
+# pocketlab embeds mttyd automatically when mttyd_url is empty — but you must run
+# `ttyd` yourself on each port (pocketlab does not spawn it):
+#     ttyd -p 7681 -W bash
+# Requires:  pip install 'pocketlab[terminal]'
+terminal:
+  mttyd_url: ""          # leave empty to use the embedded mttyd at /term-app
+  ports: [7681]
+  labels: ["server shell"]
+
+# ── links widget ───────────────────────────────────────────────────────────
+# Plain shortcuts to your other self-hosted services. No backend, just bookmarks.
+links:
+  - group: Infrastructure
+    items:
+      - { name: Portainer, url: "http://localhost:9000", icon: "🐳", desc: "Docker UI" }
+      - { name: Grafana,   url: "http://localhost:3000", icon: "📊", desc: "Metrics" }
+  - group: Apps
+    items:
+      - { name: Jellyfin,  url: "http://localhost:8096", icon: "🎬", desc: "Media" }

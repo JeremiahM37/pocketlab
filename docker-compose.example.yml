@@ -1,0 +1,31 @@
+# pocketlab + ttyd, wired together. Copy to docker-compose.yml and adjust.
+#
+#   docker compose up -d
+#   open http://<host>:8838   (then "Add to Home Screen" on your phone)
+
+services:
+  pocketlab:
+    build: .
+    # image: ghcr.io/jeremiahm37/pocketlab:latest   # once published
+    ports:
+      - "8838:8838"
+    volumes:
+      - ./pocketlab.yaml:/app/pocketlab.yaml:ro
+      # Docker widget: mount the socket to control containers on this host.
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      # System/files widgets for the host: mount what you want to expose.
+      - /:/host:ro
+      # SSH keys for remote hosts (read-only):
+      # - ${HOME}/.ssh:/root/.ssh:ro
+    restart: unless-stopped
+
+  # A terminal backend on port 7681. `-W` enables write/input. Mount whatever
+  # you want shell access to. SECURITY: this is an unauthenticated root shell on
+  # your LAN — keep it behind your VPN / reverse proxy with auth, never expose
+  # it to the internet.
+  ttyd:
+    image: tsl0922/ttyd:latest
+    command: ttyd -p 7681 -W bash
+    ports:
+      - "7681:7681"
+    restart: unless-stopped

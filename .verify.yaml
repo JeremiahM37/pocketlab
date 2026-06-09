@@ -1,0 +1,48 @@
+# End-to-end verify for pocketlab. Self-contained: spins up its own instance
+# from the example config (no external service needed), exercises the JSON API
+# and the real PWA in a headless mobile browser, then tears the instance down.
+
+checks:
+  - name: tests
+    type: pytest
+    run: ".venv/bin/pytest -q"
+
+  - name: start-server
+    type: shell
+    run: "bash scripts/verify-serve.sh start"
+
+  - name: endpoints-healthy
+    type: http
+    targets:
+      - { url: "http://127.0.0.1:8838/healthz",                        status: 200, contains: '"ok":true' }
+      - { url: "http://127.0.0.1:8838/api/config",                     status: 200, contains: '"widgets"' }
+      - { url: "http://127.0.0.1:8838/api/system",                     status: 200, contains: '"hosts"' }
+      - { url: "http://127.0.0.1:8838/api/links",                      status: 200, contains: '"groups"' }
+      - { url: "http://127.0.0.1:8838/manifest.json",                  status: 200, contains: 'pocketlab' }
+      - { url: "http://127.0.0.1:8838/sw.js",                          status: 200, contains: 'CACHE_NAME' }
+      - { url: "http://127.0.0.1:8838/api/files/browse?root=home",     status: 200, contains: '"entries"' }
+      # security: path escape and unknown root are rejected
+      - { url: "http://127.0.0.1:8838/api/files/browse?root=home&path=/etc", status: 400 }
+      - { url: "http://127.0.0.1:8838/api/files/browse?root=nope",     status: 404 }
+
+  - name: pwa-ui
+    type: ui
+    url: "http://127.0.0.1:8838/"
+    viewport: { width: 414, height: 896 }
+    step_timeout: 8
+    steps:
+      - wait: "#nav .nav-item"                                     # nav built from /api/config
+      - sleep: 1                                                   # let widgets fetch + render
+      - eval: "() => document.querySelectorAll('#nav .nav-item').length >= 4"
+      - eval: "() => document.title.includes('Home Server')"      # config title applied
+      - wait: "#tab-system .bg-slate-900"                          # a host stats card rendered
+      - eval: "() => document.querySelector('#tab-system').textContent.includes('CPU')"
+      - click: '.nav-item[data-tab="files"]'                       # switch tabs
+      - wait: "#fileList .bg-slate-900"                            # file rows rendered
+      - click: '.nav-item[data-tab="links"]'
+      - wait: "#tab-links a"                                       # link cards rendered
+      - expect_visible: '#tab-links a'
+
+  - name: stop-server
+    type: shell
+    run: "bash scripts/verify-serve.sh stop"

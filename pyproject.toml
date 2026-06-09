@@ -1,0 +1,49 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pocketlab"
+version = "0.1.0"
+description = "A mobile-first PWA dashboard for developers who self-host. Live system stats, Docker, a real terminal, and an SSH file browser — from your phone, in one YAML file."
+readme = "README.md"
+license = { file = "LICENSE" }
+authors = [{ name = "Jeremiah Mackey" }]
+requires-python = ">=3.10"
+dependencies = [
+    "fastapi>=0.110",
+    "uvicorn[standard]>=0.27",
+    "pyyaml>=6.0",
+    "pydantic>=2.0",
+    "psutil>=5.9",
+    "python-multipart>=0.0.9",
+]
+classifiers = [
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Topic :: System :: Monitoring",
+    "Topic :: System :: Systems Administration",
+    "Environment :: Web Environment",
+    "Framework :: FastAPI",
+]
+
+# Remote hosts are reached via the system `ssh` binary (honours your
+# ~/.ssh/config + keys), so SSH needs no extra Python dependency.
+[project.optional-dependencies]
+docker = ["docker>=7.0"]
+terminal = ["mttyd>=0.1.0"]
+test = ["pytest>=7", "httpx>=0.27"]
+all = ["docker>=7.0", "mttyd>=0.1.0"]
+
+[project.scripts]
+pocketlab = "pocketlab.server:main"
+
+[project.urls]
+Homepage = "https://github.com/JeremiahM37/pocketlab"
+"Terminal companion (mttyd)" = "https://github.com/JeremiahM37/mttyd"
+
+[tool.setuptools.packages.find]
+include = ["pocketlab*"]
+
+[tool.setuptools.package-data]
+pocketlab = ["static/*"]

@@ -1,0 +1,15 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.coverage
+dist/
+build/
+*.log
+.env
+
+# Your real config — only the example is tracked. Keep secrets out of git.
+pocketlab.yaml
