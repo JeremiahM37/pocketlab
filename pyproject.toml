@@ -27,13 +27,15 @@ classifiers = [
     "Framework :: FastAPI",
 ]
 
-# Remote hosts are reached via the system `ssh` binary (honours your
-# ~/.ssh/config + keys), so SSH needs no extra Python dependency.
+# System-stats + file widgets reach remote hosts via the system `ssh` binary
+# (honours ~/.ssh/config + keys), needing no extra Python dependency. The Docker
+# widget is the exception: docker-py only enables `ssh://` daemons when paramiko
+# is importable, so the docker extra pulls it in.
 [project.optional-dependencies]
-docker = ["docker>=7.0"]
+docker = ["docker>=7.0", "paramiko>=3.0"]
 terminal = ["mttyd>=0.1.0"]
 test = ["pytest>=7", "httpx>=0.27"]
-all = ["docker>=7.0", "mttyd>=0.1.0"]
+all = ["docker>=7.0", "paramiko>=3.0", "mttyd>=0.1.0"]
 
 [project.scripts]
 pocketlab = "pocketlab.server:main"

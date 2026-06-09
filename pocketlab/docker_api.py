@@ -33,6 +33,11 @@ def _client(cfg: DockerConfig):
     try:
         if base in ("local", "", None):
             return docker.from_env()
+        if base.startswith("ssh://"):
+            # use_ssh_client=True shells out to the system `ssh` (honouring
+            # ~/.ssh/config + keys) instead of requiring paramiko — consistent
+            # with how pocketlab reaches remote hosts everywhere else.
+            return docker.DockerClient(base_url=base, use_ssh_client=True)
         return docker.DockerClient(base_url=base)
     except Exception as exc:  # docker.errors.DockerException et al.
         raise DockerUnavailable(f"cannot reach Docker daemon: {exc}") from exc
@@ -54,9 +59,12 @@ def list_containers(cfg: DockerConfig) -> list[dict[str, Any]]:
         name = c.name
         if _hidden(name, cfg):
             continue
+        # Read the image name straight from attrs (already populated by list()).
+        # Using c.image.tags would lazily inspect each image — an N+1 that is
+        # disastrous over an ssh-tunnelled daemon.
         image = ""
         try:
-            image = c.image.tags[0] if c.image.tags else (c.image.short_id or "")
+            image = (c.attrs.get("Config") or {}).get("Image") or c.attrs.get("Image") or ""
         except Exception:
             pass
         out.append(
