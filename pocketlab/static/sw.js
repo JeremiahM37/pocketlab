@@ -1,6 +1,6 @@
 // pocketlab service worker — installable PWA + offline fallback.
-const CACHE_NAME = 'pocketlab-v1';
-const STATIC_ASSETS = ['/', '/manifest.json'];
+const CACHE_NAME = 'pocketlab-v2';
+const STATIC_ASSETS = ['/', '/manifest.json', '/static/tailwind-3.4.17.js'];
 
 self.addEventListener('install', event => {
   event.waitUntil(caches.open(CACHE_NAME).then(cache => cache.addAll(STATIC_ASSETS)));

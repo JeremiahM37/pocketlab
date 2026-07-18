@@ -8,7 +8,10 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <title>pocketlab</title>
 <link rel="manifest" href="/manifest.json">
-<script src="https://cdn.tailwindcss.com"></script>
+<!-- Vendored Tailwind Play build (v3.4.17 — the exact file cdn.tailwindcss.com
+     serves) so the PWA is self-contained and offline-first with no third-party
+     runtime JS. -->
+<script src="/static/tailwind-3.4.17.js"></script>
 <style>
   :root { --safe-top: env(safe-area-inset-top, 0px); --safe-bottom: env(safe-area-inset-bottom, 0px); }
   body { font-family: system-ui, -apple-system, sans-serif; background: #0f172a; overscroll-behavior-y: contain; -webkit-overflow-scrolling: touch; }
