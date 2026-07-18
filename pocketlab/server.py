@@ -29,7 +29,7 @@ from fastapi.staticfiles import StaticFiles
 
 from . import docker_api, files, system
 from .config import Config, load_config
-from .docker_api import DockerUnavailable
+from .docker_api import ContainerNotFound, DockerUnavailable
 from .files import FileError
 
 HERE = Path(__file__).parent
@@ -72,8 +72,12 @@ def create_app(config_path: str | None = None) -> FastAPI:
     async def api_config() -> JSONResponse:
         return JSONResponse(cfg.public())
 
+    # NOTE: handlers below are deliberately plain `def`, not `async def`. They
+    # do blocking I/O (psutil sampling, ssh subprocesses with multi-second
+    # timeouts, docker SDK calls, disk writes); as sync handlers FastAPI runs
+    # them in its threadpool instead of freezing the event loop for everyone.
     @app.get("/api/system")
-    async def api_system() -> JSONResponse:
+    def api_system() -> JSONResponse:
         return JSONResponse({"hosts": system.all_stats(cfg.hosts)})
 
     @app.get("/api/links")
@@ -82,20 +86,22 @@ def create_app(config_path: str | None = None) -> FastAPI:
 
     # ── docker ───────────────────────────────────────────────────────────────
     @app.get("/api/docker/containers")
-    async def api_docker_list() -> JSONResponse:
+    def api_docker_list() -> JSONResponse:
         try:
             return JSONResponse({"containers": docker_api.list_containers(cfg.docker)})
         except DockerUnavailable as exc:
             return JSONResponse({"containers": [], "error": str(exc)}, status_code=503)
 
     @app.post("/api/docker/containers/{container_id}/{action}")
-    async def api_docker_action(container_id: str, action: str) -> JSONResponse:
+    def api_docker_action(container_id: str, action: str) -> JSONResponse:
         try:
             return JSONResponse(docker_api.container_action(cfg.docker, container_id, action))
         except ValueError as exc:
-            raise HTTPException(400, str(exc))
+            raise HTTPException(400, str(exc)) from exc
+        except ContainerNotFound as exc:
+            raise HTTPException(404, str(exc)) from exc
         except DockerUnavailable as exc:
-            raise HTTPException(503, str(exc))
+            raise HTTPException(503, str(exc)) from exc
 
     # ── files ────────────────────────────────────────────────────────────────
     def _root_or_404(name: str):
@@ -105,28 +111,28 @@ def create_app(config_path: str | None = None) -> FastAPI:
         return root
 
     @app.get("/api/files/browse")
-    async def api_files_browse(
+    def api_files_browse(
         root: str = Query(...), path: str | None = Query(None)
     ) -> JSONResponse:
         r = _root_or_404(root)
         try:
             listing = files.browse(r, path)
         except FileError as exc:
-            raise HTTPException(400, str(exc))
+            raise HTTPException(400, str(exc)) from exc
         except Exception as exc:  # ssh failures, etc.
-            raise HTTPException(502, str(exc))
+            raise HTTPException(502, str(exc)) from exc
         return JSONResponse({"path": listing.path, "entries": listing.entries})
 
     @app.get("/api/files/download")
-    async def api_files_download(root: str = Query(...), path: str = Query(...)):
+    def api_files_download(root: str = Query(...), path: str = Query(...)):
         r = _root_or_404(root)
         max_bytes = cfg.files.max_download_mib * 1024 * 1024
         try:
             resolved, local, _size = files.resolve_download(r, path, max_bytes)
         except FileError as exc:
-            raise HTTPException(400, str(exc))
+            raise HTTPException(400, str(exc)) from exc
         except Exception as exc:
-            raise HTTPException(502, str(exc))
+            raise HTTPException(502, str(exc)) from exc
         name = os.path.basename(resolved)
         if local:
             return FileResponse(resolved, filename=name)
@@ -137,19 +143,21 @@ def create_app(config_path: str | None = None) -> FastAPI:
         )
 
     @app.post("/api/files/upload")
-    async def api_files_upload(
+    def api_files_upload(
         root: str = Query(...),
         path: str | None = Query(None),
         file: UploadFile = File(...),
     ) -> JSONResponse:
         r = _root_or_404(root)
-        data = await file.read()
         try:
-            result = files.save_upload(r, path, file.filename or "upload", data)
+            # Hand save_upload the underlying (spooled) file object so the
+            # upload is streamed to its destination in chunks, never slurped
+            # into memory as one bytes blob.
+            result = files.save_upload(r, path, file.filename or "upload", file.file)
         except FileError as exc:
-            raise HTTPException(400, str(exc))
+            raise HTTPException(400, str(exc)) from exc
         except Exception as exc:
-            raise HTTPException(502, str(exc))
+            raise HTTPException(502, str(exc)) from exc
         return JSONResponse({"success": True, **result})
 
     # ── embedded terminal (mttyd) ────────────────────────────────────────────

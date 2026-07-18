@@ -10,7 +10,9 @@ the frontend renders them identically.
 from __future__ import annotations
 
 import os
+import shlex
 import time
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
 import psutil
@@ -84,7 +86,12 @@ echo "===LOAD==="; cat /proc/loadavg
 echo "===NCPU==="; nproc
 echo "===MEM==="; grep -E '^(MemTotal|MemAvailable):' /proc/meminfo
 echo "===DF==="; df -kP -x tmpfs -x devtmpfs -x overlay -x squashfs 2>/dev/null | tail -n +2
-echo "===TEMP==="; for z in /sys/class/thermal/thermal_zone*; do t=$(cat "$z/type" 2>/dev/null); v=$(cat "$z/temp" 2>/dev/null); [ -n "$v" ] && echo "$t:$v"; done
+echo "===TEMP==="
+for z in /sys/class/thermal/thermal_zone*; do
+  t=$(cat "$z/type" 2>/dev/null); v=$(cat "$z/temp" 2>/dev/null)
+  [ -n "$v" ] && echo "$t:$v"
+done
+true
 """
 
 
@@ -189,7 +196,10 @@ def host_stats(host: Host) -> dict[str, Any]:
     result: dict[str, Any] = {"host": host.name}
     try:
         if host.ssh_target:
-            out = run_text(host.ssh_target, f"sh -c '{_PROBE}'", timeout=20.0)
+            # shlex.quote, not manual '…' wrapping: the probe itself contains
+            # single quotes (the meminfo grep), which would otherwise break the
+            # remote shell's parse of `sh -c '...'`.
+            out = run_text(host.ssh_target, f"sh -c {shlex.quote(_PROBE)}", timeout=20.0)
             result.update(parse_probe(out))
         else:
             result.update(_local_stats())
@@ -199,4 +209,15 @@ def host_stats(host: Host) -> dict[str, Any]:
 
 
 def all_stats(hosts: list[Host]) -> list[dict[str, Any]]:
-    return [host_stats(h) for h in hosts]
+    """Collect stats for all hosts concurrently.
+
+    Each ssh probe can take seconds (up to its 20s timeout); probing hosts in
+    parallel makes total latency that of the slowest host, not the sum. Order
+    of results matches the configured host order.
+    """
+    if not hosts:
+        return []
+    if len(hosts) == 1:
+        return [host_stats(hosts[0])]
+    with ThreadPoolExecutor(max_workers=min(len(hosts), 16)) as pool:
+        return list(pool.map(host_stats, hosts))
