@@ -21,6 +21,12 @@ class DockerUnavailable(RuntimeError):
     """Raised when the Docker SDK or daemon can't be used."""
 
 
+class ContainerNotFound(LookupError):
+    """Container doesn't exist — or is hidden by config, which must look
+    identical to callers so `hide` patterns can't be probed via the action
+    endpoint (HTTP 404)."""
+
+
 def _client(cfg: DockerConfig):
     try:
         import docker  # type: ignore
@@ -85,10 +91,18 @@ def container_action(cfg: DockerConfig, container_id: str, action: str) -> dict[
     client = _client(cfg)
     try:
         c = client.containers.get(container_id)
+    except Exception as exc:
+        # docker.errors.NotFound (checked by name so the docker SDK stays an
+        # optional import here) — a genuinely missing container is a 404.
+        if type(exc).__name__ == "NotFound":
+            raise ContainerNotFound(f"no such container: {container_id}") from exc
+        raise DockerUnavailable(f"cannot inspect container: {exc}") from exc
+    # Containers hidden from listings must not be actionable by id either.
+    if _hidden(c.name, cfg):
+        raise ContainerNotFound(f"no such container: {container_id}")
+    try:
         getattr(c, action)()
         c.reload()
         return {"id": c.short_id, "name": c.name, "state": c.status}
-    except DockerUnavailable:
-        raise
     except Exception as exc:
         raise DockerUnavailable(f"{action} failed: {exc}") from exc

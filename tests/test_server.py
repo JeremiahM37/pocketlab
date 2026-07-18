@@ -73,6 +73,32 @@ def test_docker_unknown_action_400(client):
     assert r.status_code == 400
 
 
+def test_docker_action_on_hidden_container_404(tmp_path, monkeypatch):
+    # A hide-filtered container must be a 404 through the HTTP action endpoint.
+    from pocketlab import docker_api
+
+    class _FakeContainer:
+        name = "secret-db"
+        status = "running"
+        short_id = "secret-db"[:12]
+
+        def stop(self):
+            raise AssertionError("hidden container action must never run")
+
+    class _FakeClient:
+        class containers:
+            @staticmethod
+            def get(cid):
+                return _FakeContainer()
+
+    monkeypatch.setattr(docker_api, "_client", lambda cfg: _FakeClient())
+    cfg = tmp_path / "pocketlab.yaml"
+    cfg.write_text("widgets: [docker]\ndocker:\n  hide: [secret]\n")
+    c = TestClient(create_app(str(cfg)))
+    r = c.post("/api/docker/containers/secret-db/stop")
+    assert r.status_code == 404
+
+
 def test_disabled_widget_absent_from_config(client):
     # 'terminal' was not enabled in this config
     assert "terminal" not in client.get("/api/config").json()["widgets"]

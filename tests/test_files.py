@@ -1,7 +1,10 @@
+import io
+
 import pytest
 
 from pocketlab import files
 from pocketlab.config import FileRoot
+from pocketlab.ssh import SSHError
 
 
 def _root(tmp_path):
@@ -45,10 +48,43 @@ def test_download_resolve_and_size_cap(tmp_path):
 
 
 def test_upload_writes_file_and_rejects_path_in_name(tmp_path):
-    res = files.save_upload(_root(tmp_path), None, "hello.txt", b"data")
+    res = files.save_upload(_root(tmp_path), None, "hello.txt", io.BytesIO(b"data"))
     assert res["size"] == 4
     assert (tmp_path / "hello.txt").read_bytes() == b"data"
     # filename with path components is reduced to its basename, never escapes
-    files.save_upload(_root(tmp_path), None, "../evil.txt", b"x")
+    files.save_upload(_root(tmp_path), None, "../evil.txt", io.BytesIO(b"x"))
     assert (tmp_path / "evil.txt").exists()
     assert not (tmp_path.parent / "evil.txt").exists()
+
+
+def test_upload_streams_in_chunks(tmp_path):
+    # A payload larger than CHUNK_SIZE round-trips intact via chunked writes.
+    payload = b"ab" * (files.CHUNK_SIZE + 1024)
+    res = files.save_upload(_root(tmp_path), None, "big.bin", io.BytesIO(payload))
+    assert res["size"] == len(payload)
+    assert (tmp_path / "big.bin").read_bytes() == payload
+
+
+def test_stream_process_yields_fixed_chunks(tmp_path):
+    # stream_remote's engine: output arrives in fixed-size chunks, not one blob.
+    f = tmp_path / "data.bin"
+    payload = b"x" * (5 * 1024 + 100)
+    f.write_bytes(payload)
+    chunks = list(files._stream_process(["cat", str(f)], label="cat", chunk_size=1024))
+    assert b"".join(chunks) == payload
+    assert len(chunks) >= 6  # not buffered into a single blob
+    assert all(len(c) <= 1024 for c in chunks)
+
+
+def test_stream_process_surfaces_nonzero_exit():
+    with pytest.raises(SSHError, match="boom"):
+        list(files._stream_process(["sh", "-c", "echo hi; echo boom >&2; exit 3"], label="ssh x"))
+
+
+def test_stream_process_reaps_on_early_close(tmp_path):
+    # Consumer disconnecting mid-stream must not leak the child process.
+    f = tmp_path / "data.bin"
+    f.write_bytes(b"y" * (64 * 1024))
+    gen = files._stream_process(["cat", str(f)], label="cat", chunk_size=1024)
+    assert next(gen)  # start streaming
+    gen.close()  # no leaked process; close() would raise if cleanup failed

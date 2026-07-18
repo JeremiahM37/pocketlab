@@ -11,11 +11,17 @@ from __future__ import annotations
 
 import os
 import shlex
+import subprocess
+from collections.abc import Iterator
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, BinaryIO
 
 from .config import FileRoot
-from .ssh import run, run_text
+from .ssh import SSH_OPTS, SSHError, run_text
+
+# Fixed chunk size for streaming transfers (download + upload) so large files
+# never get buffered whole in memory.
+CHUNK_SIZE = 256 * 1024
 
 
 class FileError(Exception):
@@ -140,15 +146,81 @@ def resolve_download(root: FileRoot, path: str, max_bytes: int) -> tuple[str, bo
     return target, False, size
 
 
-def stream_remote(root: FileRoot, target: str):
-    """Yield bytes of a remote file over ssh (used by a StreamingResponse)."""
-    data = run(_ssh_target(root), f"cat -- {shlex.quote(target)}", timeout=300.0)
-    yield data
+def _stream_process(argv: list[str], label: str, chunk_size: int = CHUNK_SIZE) -> Iterator[bytes]:
+    """Spawn ``argv`` and yield its stdout in fixed-size chunks.
+
+    The process is always reaped; a non-zero exit raises SSHError (with stderr)
+    after the output has been drained, and an early consumer disconnect kills
+    the child instead of leaking it.
+    """
+    proc = subprocess.Popen(argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    try:
+        while True:
+            chunk = proc.stdout.read(chunk_size)
+            if not chunk:
+                break
+            yield chunk
+        rc = proc.wait()
+        if rc != 0:
+            err = proc.stderr.read().decode("utf-8", "replace").strip()
+            raise SSHError(f"{label}: {err or f'exit code {rc}'}")
+    finally:
+        if proc.poll() is None:  # consumer stopped early — don't leak the child
+            proc.kill()
+        proc.wait()
+        proc.stdout.close()
+        proc.stderr.close()
+
+
+def stream_remote(root: FileRoot, target: str, chunk_size: int = CHUNK_SIZE) -> Iterator[bytes]:
+    """Yield bytes of a remote file over ssh (used by a StreamingResponse).
+
+    Streams ``cat`` output chunk-by-chunk rather than buffering the whole file
+    (up to the multi-GiB download cap) in memory.
+    """
+    host = _ssh_target(root)
+    argv = ["ssh", *SSH_OPTS, host, f"cat -- {shlex.quote(target)}"]
+    yield from _stream_process(argv, label=f"ssh {host}", chunk_size=chunk_size)
 
 
 # ── upload ────────────────────────────────────────────────────────────────────
 
-def save_upload(root: FileRoot, path: str | None, filename: str, data: bytes) -> dict[str, Any]:
+def _pipe_to_process(argv: list[str], label: str, stream: BinaryIO,
+                     timeout: float = 300.0) -> int:
+    """Feed ``stream`` to ``argv``'s stdin in chunks; return total bytes piped."""
+    proc = subprocess.Popen(
+        argv, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE
+    )
+    size = 0
+    try:
+        try:
+            while True:
+                chunk = stream.read(CHUNK_SIZE)
+                if not chunk:
+                    break
+                proc.stdin.write(chunk)
+                size += len(chunk)
+            proc.stdin.close()
+        except BrokenPipeError:
+            pass  # remote side died — surfaced via exit code below
+        rc = proc.wait(timeout=timeout)
+        if rc != 0:
+            err = proc.stderr.read().decode("utf-8", "replace").strip()
+            raise SSHError(f"{label}: {err or f'exit code {rc}'}")
+    except subprocess.TimeoutExpired as exc:
+        raise SSHError(f"{label}: timed out after {timeout}s") from exc
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+        proc.wait()
+        proc.stderr.close()
+    return size
+
+
+def save_upload(
+    root: FileRoot, path: str | None, filename: str, stream: BinaryIO
+) -> dict[str, Any]:
+    """Write an uploaded file, reading ``stream`` in chunks (never whole-file)."""
     # Reject path components in the filename — uploads land directly in `path`.
     safe_name = os.path.basename(filename)
     if not safe_name or safe_name in (".", ".."):
@@ -163,9 +235,16 @@ def save_upload(root: FileRoot, path: str | None, filename: str, data: bytes) ->
             raise FileError("path escapes the configured root")
         if not os.path.isdir(real_dir):
             raise FileError("upload directory does not exist")
+        size = 0
         with open(os.path.join(real_dir, safe_name), "wb") as fh:
-            fh.write(data)
+            while True:
+                chunk = stream.read(CHUNK_SIZE)
+                if not chunk:
+                    break
+                fh.write(chunk)
+                size += len(chunk)
     else:
-        q = shlex.quote(dest)
-        run(_ssh_target(root), f"cat > {q}", timeout=300.0, stdin=data)
-    return {"name": safe_name, "size": len(data)}
+        host = _ssh_target(root)
+        argv = ["ssh", *SSH_OPTS, host, f"cat > {shlex.quote(dest)}"]
+        size = _pipe_to_process(argv, label=f"ssh {host}", stream=stream)
+    return {"name": safe_name, "size": size}

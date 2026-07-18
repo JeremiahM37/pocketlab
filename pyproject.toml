@@ -44,6 +44,16 @@ pocketlab = "pocketlab.server:main"
 Homepage = "https://github.com/JeremiahM37/pocketlab"
 "Terminal companion (mttyd)" = "https://github.com/JeremiahM37/mttyd"
 
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP"]
+ignore = [
+    "B008",  # FastAPI's Query(...)/File(...) defaults are the framework idiom
+]
+
 [tool.setuptools.packages.find]
 include = ["pocketlab*"]
 
