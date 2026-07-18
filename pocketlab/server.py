@@ -20,6 +20,7 @@ set, an embedded mttyd app is mounted at /term-app and the Terminal tab iframes
 from __future__ import annotations
 
 import argparse
+import logging
 import os
 from pathlib import Path
 
@@ -34,6 +35,8 @@ from .files import FileError
 
 HERE = Path(__file__).parent
 STATIC = HERE / "static"
+
+logger = logging.getLogger("pocketlab")
 
 
 def create_app(config_path: str | None = None) -> FastAPI:
@@ -110,6 +113,13 @@ def create_app(config_path: str | None = None) -> FastAPI:
             raise HTTPException(404, f"unknown file root {name!r}")
         return root
 
+    def _upstream_error(op: str, root, exc: Exception) -> HTTPException:
+        # ssh stderr / exception text can leak server paths, usernames and
+        # host details — log it here, hand the client a generic message that
+        # still names the root so the operator knows where to look.
+        logger.error("files %s failed for root %r (host %s): %s", op, root.name, root.host, exc)
+        return HTTPException(502, f"upstream error on file root {root.name!r} — see server log")
+
     @app.get("/api/files/browse")
     def api_files_browse(
         root: str = Query(...), path: str | None = Query(None)
@@ -120,7 +130,7 @@ def create_app(config_path: str | None = None) -> FastAPI:
         except FileError as exc:
             raise HTTPException(400, str(exc)) from exc
         except Exception as exc:  # ssh failures, etc.
-            raise HTTPException(502, str(exc)) from exc
+            raise _upstream_error("browse", r, exc) from exc
         return JSONResponse({"path": listing.path, "entries": listing.entries})
 
     @app.get("/api/files/download")
@@ -132,7 +142,7 @@ def create_app(config_path: str | None = None) -> FastAPI:
         except FileError as exc:
             raise HTTPException(400, str(exc)) from exc
         except Exception as exc:
-            raise HTTPException(502, str(exc)) from exc
+            raise _upstream_error("download", r, exc) from exc
         name = os.path.basename(resolved)
         if local:
             return FileResponse(resolved, filename=name)
@@ -157,7 +167,7 @@ def create_app(config_path: str | None = None) -> FastAPI:
         except FileError as exc:
             raise HTTPException(400, str(exc)) from exc
         except Exception as exc:
-            raise HTTPException(502, str(exc)) from exc
+            raise _upstream_error("upload", r, exc) from exc
         return JSONResponse({"success": True, **result})
 
     # ── embedded terminal (mttyd) ────────────────────────────────────────────
