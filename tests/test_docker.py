@@ -18,10 +18,19 @@ class _FakeContainer:
         self.image = _FakeImage(tags)
         self.actions = []
 
-    def start(self): self.status = "running"; self.actions.append("start")
-    def stop(self): self.status = "exited"; self.actions.append("stop")
-    def restart(self): self.actions.append("restart")
-    def reload(self): pass
+    def start(self):
+        self.status = "running"
+        self.actions.append("start")
+
+    def stop(self):
+        self.status = "exited"
+        self.actions.append("stop")
+
+    def restart(self):
+        self.actions.append("restart")
+
+    def reload(self):
+        pass
 
 
 class _FakeClient:
@@ -72,3 +81,12 @@ def test_action_invokes_method(monkeypatch):
     res = docker_api.container_action(DockerConfig(), "web", "start")
     assert res["state"] == "running"
     assert "start" in c.actions
+
+
+def test_action_on_hidden_container_rejected(monkeypatch):
+    # A container filtered from listings by `hide` must not be actionable by id.
+    c = _FakeContainer("secret-db", "running", ["i"])
+    monkeypatch.setattr(docker_api, "_client", lambda cfg: _FakeClient([c]))
+    with pytest.raises(docker_api.ContainerNotFound):
+        docker_api.container_action(DockerConfig(hide=["secret"]), "secret-db", "stop")
+    assert c.actions == []  # the action never ran
