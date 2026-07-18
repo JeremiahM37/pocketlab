@@ -199,7 +199,7 @@ def host_stats(host: Host) -> dict[str, Any]:
             # shlex.quote, not manual '…' wrapping: the probe itself contains
             # single quotes (the meminfo grep), which would otherwise break the
             # remote shell's parse of `sh -c '...'`.
-            out = run_text(host.ssh_target, f"sh -c {shlex.quote(_PROBE)}", timeout=20.0)
+            out = run_text(host.ssh_target, f"sh -c {shlex.quote(_PROBE)}")
             result.update(parse_probe(out))
         else:
             result.update(_local_stats())
@@ -211,7 +211,7 @@ def host_stats(host: Host) -> dict[str, Any]:
 def all_stats(hosts: list[Host]) -> list[dict[str, Any]]:
     """Collect stats for all hosts concurrently.
 
-    Each ssh probe can take seconds (up to its 20s timeout); probing hosts in
+    Each ssh probe can take seconds (up to ssh.DEFAULT_COMMAND_TIMEOUT); probing hosts in
     parallel makes total latency that of the slowest host, not the sum. Order
     of results matches the configured host order.
     """

@@ -11,9 +11,14 @@ from __future__ import annotations
 
 import subprocess
 
+# Seconds ssh waits to establish the TCP connection before giving up.
+CONNECT_TIMEOUT = 5
+# Overall wall-clock deadline for a remote command (connection + execution).
+DEFAULT_COMMAND_TIMEOUT = 20.0
+
 SSH_OPTS = [
     "-o", "BatchMode=yes",
-    "-o", "ConnectTimeout=5",
+    "-o", f"ConnectTimeout={CONNECT_TIMEOUT}",
     "-o", "StrictHostKeyChecking=accept-new",
 ]
 
@@ -22,7 +27,13 @@ class SSHError(RuntimeError):
     pass
 
 
-def run(target: str, command: str, *, timeout: float = 20.0, stdin: bytes | None = None) -> bytes:
+def run(
+    target: str,
+    command: str,
+    *,
+    timeout: float = DEFAULT_COMMAND_TIMEOUT,
+    stdin: bytes | None = None,
+) -> bytes:
     """Run ``command`` on ``target`` (user@host) via ssh, returning stdout bytes.
 
     Raises SSHError on non-zero exit or timeout.
@@ -45,5 +56,5 @@ def run(target: str, command: str, *, timeout: float = 20.0, stdin: bytes | None
     return proc.stdout
 
 
-def run_text(target: str, command: str, *, timeout: float = 20.0) -> str:
+def run_text(target: str, command: str, *, timeout: float = DEFAULT_COMMAND_TIMEOUT) -> str:
     return run(target, command, timeout=timeout).decode("utf-8", "replace")

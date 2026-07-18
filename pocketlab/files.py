@@ -23,6 +23,12 @@ from .ssh import SSH_OPTS, SSHError, run_text
 # never get buffered whole in memory.
 CHUNK_SIZE = 256 * 1024
 
+# Remote-operation deadlines (seconds). Directory listings and size stats are
+# small, bounded commands; uploads pipe whole files so they get a long leash.
+BROWSE_TIMEOUT = 20.0
+STAT_TIMEOUT = 15.0
+UPLOAD_TIMEOUT = 300.0
+
 
 class FileError(Exception):
     """Bad request — invalid root, path escape, or missing file (HTTP 400)."""
@@ -100,7 +106,7 @@ def _browse_ssh(root: FileRoot, target: str) -> Listing:
     q = shlex.quote(target)
     # GNU find printf: type, size, mtime(epoch), name — one entry per line.
     cmd = f"find {q} -maxdepth 1 -mindepth 1 -printf '%y\\t%s\\t%T@\\t%f\\n'"
-    out = run_text(_ssh_target(root), cmd, timeout=20.0)
+    out = run_text(_ssh_target(root), cmd, timeout=BROWSE_TIMEOUT)
     entries = []
     for line in out.splitlines():
         parts = line.split("\t")
@@ -136,7 +142,7 @@ def resolve_download(root: FileRoot, path: str, max_bytes: int) -> tuple[str, bo
         return real, True, size
     # remote: stat size first to enforce the cap before streaming
     q = shlex.quote(target)
-    out = run_text(_ssh_target(root), f"stat -c '%s' {q}", timeout=15.0).strip()
+    out = run_text(_ssh_target(root), f"stat -c '%s' {q}", timeout=STAT_TIMEOUT).strip()
     try:
         size = int(out)
     except ValueError as exc:
@@ -186,7 +192,7 @@ def stream_remote(root: FileRoot, target: str, chunk_size: int = CHUNK_SIZE) -> 
 # ── upload ────────────────────────────────────────────────────────────────────
 
 def _pipe_to_process(argv: list[str], label: str, stream: BinaryIO,
-                     timeout: float = 300.0) -> int:
+                     timeout: float = UPLOAD_TIMEOUT) -> int:
     """Feed ``stream`` to ``argv``'s stdin in chunks; return total bytes piped."""
     proc = subprocess.Popen(
         argv, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE

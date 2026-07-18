@@ -145,7 +145,7 @@ verify                           # full end-to-end (API + headless PWA) — see 
 ```
 
 No build step — the frontend is a single hand-written `static/app.html` (Tailwind
-via CDN). Edit and refresh.
+Play build vendored at `static/tailwind-3.4.17.js`, no CDN). Edit and refresh.
 
 ## Architecture
 
