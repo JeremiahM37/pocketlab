@@ -28,7 +28,7 @@ from fastapi import FastAPI, File, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import docker_api, files, system
+from . import __version__, docker_api, files, system
 from .config import Config, load_config
 from .docker_api import ContainerNotFound, DockerUnavailable
 from .files import FileError
@@ -41,7 +41,7 @@ logger = logging.getLogger("pocketlab")
 
 def create_app(config_path: str | None = None) -> FastAPI:
     cfg: Config = load_config(config_path)
-    app = FastAPI(title="pocketlab", version="0.1.0")
+    app = FastAPI(title="pocketlab", version=__version__)
 
     app.mount("/static", StaticFiles(directory=str(STATIC)), name="static")
 
